@@ -21,36 +21,40 @@
 #include <string.h>
 #include <assert.h>
 
-#define ARRAY_SIZE(a) ( (sizeof (a)) / (sizeof (a[0])) )
+#define ARRAY_SIZE(a) ((sizeof(a)) / (sizeof(a[0])))
 
-#define UNUSED(s)				\
-	do {					\
-		(void)(s);			\
+#define UNUSED(s) \
+	do              \
+	{               \
+		(void)(s);    \
 	} while (0)
 
-#define TRACE(s)				\
-	do {					\
-		fprintf(stderr,			\
-			"error: %s:%d: %s\n",	\
-			__FILE__,		\
-			__LINE__,		\
-			safe_strlen(s) ?	\
-			(s) : "^");		\
+#define TRACE(s)                         \
+	do                                     \
+	{                                      \
+		fprintf(stderr,                      \
+						"error: %s:%d: %s\n",        \
+						__FILE__,                    \
+						__LINE__,                    \
+						safe_strlen(s) ? (s) : "^"); \
 	} while (0)
 
-#define EXIT(s)					\
-	do {					\
-		TRACE((s));			\
-		assert( 0 );			\
-		exit(-1);			\
+#define EXIT(s) \
+	do            \
+	{             \
+		TRACE((s)); \
+		assert(0);  \
+		exit(-1);   \
 	} while (0)
 
-#define FREE(p)					\
-	do {					\
-		if ((p)) {			\
-			free((void *)(p));	\
-			(p) = NULL;		\
-		}				\
+#define FREE(p)          \
+	do                     \
+	{                      \
+		if ((p))             \
+		{                    \
+			free((void *)(p)); \
+			(p) = NULL;        \
+		}                    \
 	} while (0)
 
 void us_sleep(uint64_t us);
@@ -64,5 +68,7 @@ size_t safe_strlen(const char *s);
 size_t page_size(void);
 
 void *memory_align(void *p, size_t n);
+
+size_t descriptor_align(size_t fd);
 
 #endif /* _SYSTEM_H_ */
