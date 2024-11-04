@@ -94,3 +94,9 @@ descriptor_align(size_t d)
 {
 	return (d / page_size()) * page_size();
 }
+
+void *
+shift(void *ptr, size_t n)
+{
+	return (void *)(((size_t)ptr) + n);
+}
