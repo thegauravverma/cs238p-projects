@@ -59,9 +59,7 @@ struct scm *scm_open(const char *pathname, int truncate)
   struct scm *scm;
   size_t curr;
   size_t vm_addr;
-
-  UNUSED(truncate);
-
+  struct initmem *metadata;
   if (!(scm = malloc(sizeof(struct scm))))
   {
     /* Error and exit */
@@ -69,10 +67,10 @@ struct scm *scm_open(const char *pathname, int truncate)
 
   if (truncate)
   {
-    /* Fill the file with zero's initially */
+    scm->fd = open(pathname, O_RDWR | O_TRUNC);
+  } else {
+    scm->fd = open(pathname, O_RDWR);
   }
-
-  scm->fd = open(pathname, O_RDWR);
   if (!scm->fd)
   {
     /* Error and exit */
@@ -94,16 +92,19 @@ struct scm *scm_open(const char *pathname, int truncate)
   }
 
   /* Size and sign initialization */
-  scm->memory_in_use = 0;
-  if (!(scm->mem = scm_malloc(scm, 24)))
+  metadata = (struct initmem *)scm_malloc(scm, sizeof(struct initmem));
+  if (!metadata)
   {
     /* Error and exit */
   }
-
-  ((struct initmem *)scm->mem)->sign = 0; /* TODO */
-  ((struct initmem *)scm->mem)->size = scm->memory_in_use;
-  ((struct initmem *)scm->mem)->checksum = scm->memory_in_use;
-
+  if (truncate || metadata->sign != 73 || metadata->checksum != (metadata->sign ^ metadata->size)) {
+    metadata->sign = 73;
+    metadata->size = 0;
+    metadata->checksum = metadata->sign ^ metadata->size;
+    scm->memory_in_use = sizeof(struct initmem);
+  } else {
+    scm->memory_in_use = metadata->size;
+  }
   return scm;
 }
 
@@ -124,23 +125,37 @@ void scm_close(struct scm *scm)
 void *scm_malloc(struct scm *scm, size_t N)
 {
   void *ptr;
+  struct initmem *metadata;
   if ((scm->memory_in_use + N) > scm->available_memory)
   {
-    /* Exit and error */
+    TRACE("Not Enough Memory for Allocation.");
   }
 
   ptr = (uint8_t *)scm->mem + scm->memory_in_use;
   scm->memory_in_use += N;
+
+    metadata = (struct initmem *)scm->mem;
+    metadata->size = scm->memory_in_use;
+    metadata->checksum = metadata->sign ^ metadata->size;
 
   return ptr;
 }
 
 char *scm_strdup(struct scm *scm, const char *s)
 {
-  UNUSED(s);
-  UNUSED(scm);
-  /* STUB */
-  return "APPLE";
+  size_t str_len;
+  char *dup_str;
+  if(!s) {
+    TRACE("Given string is NULL");
+    return NULL;
+  }
+  str_len = strlen(s) + 1;
+  if(!(dup_str = scm_malloc(scm,str_len))) {
+    TRACE(0);
+    return NULL;
+  }
+  memcpy(dup_str, s, str_len);
+  return dup_str;
 }
 
 void scm_free(struct scm *scm, void *p)
