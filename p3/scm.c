@@ -17,6 +17,7 @@
 #include "scm.h"
 
 #define VM_ADDR 0x600000000000
+#define SIGNATURE 73
 
 struct free_block
 {
@@ -46,20 +47,24 @@ void set_file_size(struct scm *scm)
 {
   /* Check that the file's open */
   struct stat st;
-  fstat(scm->fd, &st);
+  if (fstat(scm->fd, &st) == -1)
+  {
+    TRACE("Failed to stat file");
+    exit(EXIT_FAILURE); /* Exit if fstat fails */
+  }
 
   if (!S_ISREG(st.st_mode))
   {
-    /* Error and exit */
+    TRACE("Error: Not a regular file");
+    exit(EXIT_FAILURE);
   }
   scm->available_memory = descriptor_align(st.st_size);
 
   if (scm->available_memory < 1)
   {
-    /* Error and exit */
+    TRACE("Error: Invalid available memory size");
+    exit(EXIT_FAILURE);
   }
-
-  /** Lecture requested to return status, but if we error check inside this fn we are golden **/
 }
 
 struct scm *scm_open(const char *pathname, int truncate)
@@ -70,48 +75,61 @@ struct scm *scm_open(const char *pathname, int truncate)
   struct initmem *metadata;
   if (!(scm = malloc(sizeof(struct scm))))
   {
-    /* Error and exit */
+    TRACE("Failed to allocate memory for scm struct");
+    return NULL;
   };
 
-  if (truncate)
-  {
-    scm->fd = open(pathname, O_RDWR | O_TRUNC);
-  }
-  else
-  {
-    scm->fd = open(pathname, O_RDWR);
-  }
+  scm->fd = open(pathname, O_RDWR);
   if (!scm->fd)
   {
-    /* Error and exit */
+    TRACE("Failed to open file");
+    free(scm);
+    return NULL;
   }
 
-  set_file_size(scm);     /* Error checking done inside fn */
+  set_file_size(scm);     /* Set the file size and available memory in scm */
   curr = (size_t)sbrk(0); /* Gets the current breakline */
   vm_addr = descriptor_align(VM_ADDR);
-
+  if (truncate)
+  {
+    if (ftruncate(scm->fd, (long)scm->available_memory) == -1)
+    {
+      TRACE("Failed to truncate file");
+      close(scm->fd);
+      free(scm);
+      return NULL;
+    };
+  }
   if (vm_addr < curr)
   {
-    /* Error and exit */
+    TRACE("Error: address is below program break");
+    close(scm->fd);
+    free(scm);
+    exit(EXIT_FAILURE);
   }
 
   scm->mem = mmap((void *)vm_addr, scm->available_memory, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_SHARED, scm->fd, 0);
   if (scm->mem == MAP_FAILED)
   {
-    /* Error and exit */
+    TRACE("Failed to map memory");
+    close(scm->fd);
+    free(scm);
+    return NULL;
   }
 
   /* Size and sign initialization */
-  metadata = (struct initmem *)scm_malloc(scm, sizeof(struct initmem));
+  metadata = (struct initmem *)scm->mem;
   if (!metadata)
   {
-    /* Error and exit */
+    TRACE("Error: Failed to access metadata");
+    scm_close(scm);
+    return NULL;
   }
-  if (truncate || metadata->sign != 73 || metadata->checksum != (metadata->sign ^ metadata->size))
+  if (truncate || metadata->sign != SIGNATURE || metadata->checksum != (SIGNATURE ^ metadata->size))
   {
-    metadata->sign = 73;
+    metadata->sign = SIGNATURE;
     metadata->size = 0;
-    metadata->checksum = metadata->sign ^ metadata->size;
+    metadata->checksum = SIGNATURE ^ metadata->size;
     metadata->freelist = 0;
     scm->memory_in_use = sizeof(struct initmem);
   }
@@ -124,10 +142,14 @@ struct scm *scm_open(const char *pathname, int truncate)
 
 void scm_close(struct scm *scm)
 {
-  if (scm->memory_in_use /** MIGHT BE WRONG **/)
+  if (scm->mem)
   {
-    msync((void *)scm->memory_in_use, scm->available_memory, MS_SYNC);
-    munmap((void *)scm->memory_in_use, scm->available_memory);
+    struct initmem *metadata = (struct initmem *)scm->mem;
+    metadata->size = scm->memory_in_use;
+    metadata->sign = SIGNATURE;
+    metadata->checksum = SIGNATURE ^ metadata->size;
+    msync(scm->mem, scm->available_memory, MS_SYNC);
+    munmap(scm->mem, scm->available_memory);
   }
   if (scm->fd)
   {
@@ -207,7 +229,6 @@ void *scm_malloc_free_block(struct scm *scm)
 void *scm_malloc(struct scm *scm, size_t N)
 {
   void *ptr;
-  struct initmem *metadata;
 
   if ((ptr = check_free_list(scm, N)))
   {
@@ -217,14 +238,11 @@ void *scm_malloc(struct scm *scm, size_t N)
   if ((scm->memory_in_use + N) > scm->available_memory)
   {
     TRACE("Not Enough Memory for Allocation.");
+    return NULL;
   }
 
   ptr = (uint8_t *)scm->mem + scm->memory_in_use;
   scm->memory_in_use += N;
-
-  metadata = (struct initmem *)scm->mem;
-  metadata->size = scm->memory_in_use;
-  metadata->checksum = metadata->sign ^ metadata->size;
 
   return ptr;
 }
@@ -233,6 +251,7 @@ char *scm_strdup(struct scm *scm, const char *s)
 {
   size_t str_len;
   char *dup_str;
+  size_t i;
   if (!s)
   {
     TRACE("Given string is NULL");
@@ -244,7 +263,10 @@ char *scm_strdup(struct scm *scm, const char *s)
     TRACE(0);
     return NULL;
   }
-  memcpy(dup_str, s, str_len);
+  for (i = 0; i < str_len; i++)
+  {
+    dup_str[i] = s[i];
+  }
   return dup_str;
 }
 
@@ -366,7 +388,7 @@ size_t scm_capacity(const struct scm *scm)
 
 void *scm_mbase(struct scm *scm)
 {
-  return scm->mem;
+  return (uint8_t *)scm->mem;
 }
 
 /**
