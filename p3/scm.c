@@ -17,6 +17,7 @@
 #include "scm.h"
 
 #define VM_ADDR 0x600000000000
+#define SIGNATURE 73
 
 struct scm
 {
@@ -64,13 +65,7 @@ struct scm *scm_open(const char *pathname, int truncate)
   {
     /* Error and exit */
   };
-
-  if (truncate)
-  {
-    scm->fd = open(pathname, O_RDWR | O_TRUNC);
-  } else {
-    scm->fd = open(pathname, O_RDWR);
-  }
+  scm->fd = open(pathname, O_RDWR);
   if (!scm->fd)
   {
     /* Error and exit */
@@ -79,7 +74,14 @@ struct scm *scm_open(const char *pathname, int truncate)
   set_file_size(scm);     /* Error checking done inside fn */
   curr = (size_t)sbrk(0); /* Gets the current breakline */
   vm_addr = descriptor_align(VM_ADDR);
-
+    if(truncate) {
+    if(ftruncate(scm->fd, (long) scm->available_memory) == -1) {
+          close(scm->fd);
+            free(scm);
+            TRACE("ftruncate failed");
+            return NULL;
+    };
+  }
   if (vm_addr < curr)
   {
     /* Error and exit */
@@ -92,17 +94,20 @@ struct scm *scm_open(const char *pathname, int truncate)
   }
 
   /* Size and sign initialization */
-  metadata = (struct initmem *)scm_malloc(scm, sizeof(struct initmem));
+  metadata = (struct initmem *)scm->mem;
   if (!metadata)
   {
     /* Error and exit */
   }
-  if (truncate || metadata->sign != 73 || metadata->checksum != (metadata->sign ^ metadata->size)) {
-    metadata->sign = 73;
+  if (truncate || metadata->sign != SIGNATURE || metadata->checksum != (SIGNATURE ^ metadata->size)) {
+    printf("Sign: %d, Size: %d, Checksum: %d\n", metadata->sign, metadata->size, metadata->checksum);
+    metadata->sign = SIGNATURE;
     metadata->size = 0;
-    metadata->checksum = metadata->sign ^ metadata->size;
+    metadata->checksum =SIGNATURE ^ metadata->size;
     scm->memory_in_use = sizeof(struct initmem);
   } else {
+      printf("here");
+      printf("Sign: %d, Size: %d, Checksum: %d\n", metadata->sign, metadata->size, metadata->checksum);
     scm->memory_in_use = metadata->size;
   }
   return scm;
@@ -110,10 +115,15 @@ struct scm *scm_open(const char *pathname, int truncate)
 
 void scm_close(struct scm *scm)
 {
-  if (scm->memory_in_use /** MIGHT BE WRONG **/)
+  if (scm->mem)
   {
-    msync((void *)scm->memory_in_use, scm->available_memory, MS_SYNC);
-    munmap((void *)scm->memory_in_use, scm->available_memory);
+    struct initmem *metadata = (struct initmem *)scm->mem;
+    metadata->size = scm->memory_in_use;
+    metadata->sign = SIGNATURE;
+    metadata->checksum = SIGNATURE ^ metadata->size;
+    printf("Sign: %d, Size: %d, Checksum: %d\n", metadata->sign, metadata->size, metadata->checksum);
+    msync(scm->mem, scm->available_memory, MS_SYNC);
+    munmap(scm->mem, scm->available_memory);
   }
   if (scm->fd)
   {
@@ -124,37 +134,35 @@ void scm_close(struct scm *scm)
 
 void *scm_malloc(struct scm *scm, size_t N)
 {
-  void *ptr;
-  struct initmem *metadata;
-  if ((scm->memory_in_use + N) > scm->available_memory)
-  {
-    TRACE("Not Enough Memory for Allocation.");
-  }
+    void *ptr;
+    if ((scm->memory_in_use + N) > scm->available_memory) {
+        TRACE("Not Enough Memory for Allocation.");
+        return NULL;
+    }
 
-  ptr = (uint8_t *)scm->mem + scm->memory_in_use;
-  scm->memory_in_use += N;
+    ptr = (uint8_t *)scm->mem + scm->memory_in_use;
+    scm->memory_in_use += N;
 
-    metadata = (struct initmem *)scm->mem;
-    metadata->size = scm->memory_in_use;
-    metadata->checksum = metadata->sign ^ metadata->size;
-
-  return ptr;
+    return ptr;
 }
 
 char *scm_strdup(struct scm *scm, const char *s)
 {
   size_t str_len;
   char *dup_str;
-  if(!s) {
+  size_t i;
+  if (!s) {
     TRACE("Given string is NULL");
     return NULL;
   }
   str_len = strlen(s) + 1;
-  if(!(dup_str = scm_malloc(scm,str_len))) {
+  if (!(dup_str = scm_malloc(scm, str_len))) {
     TRACE(0);
     return NULL;
   }
-  memcpy(dup_str, s, str_len);
+  for (i = 0; i < str_len; i++) {
+    dup_str[i] = s[i];
+  }
   return dup_str;
 }
 
