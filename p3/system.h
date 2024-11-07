@@ -71,4 +71,6 @@ void *memory_align(void *p, size_t n);
 
 size_t descriptor_align(size_t fd);
 
+void *shift(void *p, size_t N);
+
 #endif /* _SYSTEM_H_ */
