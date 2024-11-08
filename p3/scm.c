@@ -32,9 +32,9 @@ struct scm
 /* Metadata structure for tracking memory usage and integrity */
 struct initmem
 {
-  uint8_t sign;     /* Signature */
-  uint8_t size;     /* Memory in use */
-  uint8_t checksum; /* Checksum function */
+  uint64_t sign;     /* Signature */
+  uint64_t size;     /* Memory in use */
+  uint64_t checksum; /* Checksum function */
 };
 
 /* Sets the file size and updates available memory in scm */
