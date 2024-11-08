@@ -19,13 +19,6 @@
 #define VM_ADDR 0x600000000000
 #define SIGNATURE 73
 
-struct free_block
-{
-  size_t block_start; /* Start of our freelist, offset by mem */
-  size_t block_size;  /* Block size for the freeblock */
-  size_t next;        /* Next block; 0 when null */
-};
-
 struct scm
 {
   size_t memory_in_use;    /* Currently used memory */
@@ -40,7 +33,6 @@ struct initmem
   uint8_t sign;     /* Signature */
   uint8_t size;     /* Memory in use */
   uint8_t checksum; /* Checksum function */
-  uint8_t freelist; /* Free list */
 };
 
 void set_file_size(struct scm *scm)
@@ -76,7 +68,7 @@ struct scm *scm_open(const char *pathname, int truncate)
   if (!(scm = malloc(sizeof(struct scm))))
   {
     TRACE("Failed to allocate memory for scm struct");
-    return NULL;
+    exit(EXIT_FAILURE);
   };
 
   scm->fd = open(pathname, O_RDWR);
@@ -84,7 +76,7 @@ struct scm *scm_open(const char *pathname, int truncate)
   {
     TRACE("Failed to open file");
     free(scm);
-    return NULL;
+    exit(EXIT_FAILURE);
   }
 
   set_file_size(scm);     /* Set the file size and available memory in scm */
@@ -97,7 +89,7 @@ struct scm *scm_open(const char *pathname, int truncate)
       TRACE("Failed to truncate file");
       close(scm->fd);
       free(scm);
-      return NULL;
+      exit(EXIT_FAILURE);
     };
   }
   if (vm_addr < curr)
@@ -130,7 +122,6 @@ struct scm *scm_open(const char *pathname, int truncate)
     metadata->sign = SIGNATURE;
     metadata->size = 0;
     metadata->checksum = SIGNATURE ^ metadata->size;
-    metadata->freelist = 0;
     scm->memory_in_use = sizeof(struct initmem);
   }
   else
@@ -160,86 +151,23 @@ void scm_close(struct scm *scm)
 
 void *check_free_list(struct scm *scm, size_t N)
 {
-  struct free_block *freelist;
-  struct free_block *curr;
-  struct free_block *next;
-
-  /* Check if the free list exists */
-  if ((!(struct initmem *)scm->mem) || (((struct initmem *)scm->mem)->freelist == 0))
-  {
-    return NULL;
-  }
-
-  freelist = shift(scm->mem, ((struct initmem *)scm->mem)->freelist);
-  curr = freelist;
-
-  /* Check if we can use the first block */
-  if (N == curr->block_size)
-  {
-    ((struct initmem *)scm->mem)->freelist = curr->next;
-    return curr;
-  }
-
-  /* We still check if we can use part of the first block */
-  if (N < curr->block_size)
-  {
-    curr->block_size -= N;
-    return shift(freelist, curr->block_start + curr->block_size - N);
-  }
-
-  while (curr->next != 0)
-  {
-    next = shift(freelist, curr->next);
-    if (N == next->block_size)
-    {
-      curr->next = next->next;
-      return next;
-    }
-
-    if (N < next->block_size)
-    {
-      next->block_size -= N;
-      return shift(freelist, next->block_start + next->block_size - N);
-    }
-  }
+  UNUSED(scm);
+  UNUSED(N);
 
   return NULL;
-}
-
-void *scm_malloc_free_block(struct scm *scm)
-{
-  void *ptr;
-  struct initmem *metadata;
-
-  if ((scm->memory_in_use + sizeof(struct free_block)) > scm->available_memory)
-  {
-    TRACE("Not Enough Memory for Allocation.");
-  }
-
-  ptr = (uint8_t *)scm->mem + scm->memory_in_use;
-  scm->memory_in_use += sizeof(struct free_block);
-
-  metadata = (struct initmem *)scm->mem;
-  metadata->size = scm->memory_in_use;
-  metadata->checksum = metadata->sign ^ metadata->size;
-
-  return ptr;
 }
 
 void *scm_malloc(struct scm *scm, size_t N)
 {
   void *ptr;
 
-  if ((ptr = check_free_list(scm, N)))
-  {
-    return ptr;
-  }
-
   if ((scm->memory_in_use + N) > scm->available_memory)
   {
     TRACE("Not Enough Memory for Allocation.");
-    return NULL;
+    exit(EXIT_FAILURE);
   }
+
+  TRACE("HERE!");
 
   ptr = (uint8_t *)scm->mem + scm->memory_in_use;
   scm->memory_in_use += N;
@@ -272,107 +200,9 @@ char *scm_strdup(struct scm *scm, const char *s)
 
 void scm_free(struct scm *scm, void *p)
 {
-  struct free_block *freelist;
-  struct free_block *curr;
-  struct free_block *next;
+  UNUSED(scm);
+  UNUSED(p);
 
-  size_t block_start = (size_t)p - (size_t)scm->mem;
-  size_t block_end = block_start + sizeof(p);
-
-  freelist = shift(scm->mem, ((struct initmem *)scm->mem)->freelist);
-
-  /* If we don't find a freelist, we should start one */
-  if (freelist->block_start == 0)
-  {
-    freelist->block_start = (size_t)p - (size_t)scm->mem;
-    freelist->block_size = sizeof(p);
-    freelist->next = 0;
-    return;
-  }
-
-  /* Else we want to check the start, see if we can combine... */
-  if (block_end == freelist->block_start)
-  {
-    freelist->block_start = block_start;
-    freelist->block_size += sizeof(p);
-    return;
-  }
-
-  /* Else, if we can't combine, and if we should insert at the start, we will */
-  if (block_end < freelist->block_start)
-  {
-    if (!(curr = scm_malloc_free_block(scm)))
-    {
-      TRACE("No memory remaining in freelist allocation!");
-      exit(1);
-    }
-    curr->block_start = block_start;
-    curr->block_size = sizeof(p);
-    curr->next = freelist->next;
-    ((struct initmem *)scm->mem)->freelist = (size_t)curr - (size_t)scm->mem;
-    return;
-  }
-
-  /* Otherwise, we need to continue in the list */
-  curr = freelist;
-  while (curr->next != 0)
-  {
-    next = (struct free_block *)shift(scm->mem, curr->next);
-
-    /* Check if we can combine with beginning and end */
-    if (block_start == curr->block_start + curr->block_size && block_end == next->block_start)
-    {
-      /* We adjust the size and next of the first free_block, then delete the other */
-      curr->block_size += sizeof(p) + next->block_size;
-      curr->next = next->next;
-      scm_free(scm, next);
-      return;
-    }
-
-    /* Then if we can combine with the beginning */
-    if (block_start == curr->block_start + curr->block_size)
-    {
-      curr->block_size += sizeof(p);
-      return;
-    }
-
-    /* And if we can combine with the end */
-    if (block_end == next->block_start)
-    {
-      next->block_start -= sizeof(p);
-      next->block_size += sizeof(p);
-      return;
-    }
-
-    /* Else if it's somewhere in the middle */
-    if (block_end < next->block_start)
-    {
-      /* I use freelist as a temp variable to save memory here */
-      freelist = scm_malloc_free_block(scm);
-      freelist->block_start = block_start;
-      freelist->block_size = sizeof(p);
-      freelist->next = (size_t)next - (size_t)scm->mem;
-      curr->next = (size_t)freelist - (size_t)scm->mem;
-      return;
-    }
-
-    /* Otherwise we iterate */
-    curr = next;
-  }
-
-  /* We need to check for the last combination */
-  if (block_start == curr->block_start + curr->block_size)
-  {
-    curr->block_size += sizeof(p);
-    return;
-  }
-
-  /* Otherwise, we stick it at the end */
-  next = scm_malloc_free_block(scm);
-  next->block_start = block_start;
-  next->block_size = sizeof(p);
-  next->next = 0;
-  curr->next = (size_t)next - (size_t)scm->mem;
   return;
 }
 
