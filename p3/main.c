@@ -38,8 +38,14 @@ insert(struct avl *avl, const char *s)
 }
 
 static int
+<<<<<<< Updated upstream
 remove(struct avl *avl, const char *s)
 {
+=======
+remove_(struct avl *avl, const char *s)
+{
+	TRACE("Entering remove_");
+>>>>>>> Stashed changes
 	if (avl_remove(avl, s))
 	{
 		printf("error: failed to remove '%s'", s);
@@ -152,7 +158,11 @@ shell_fnc(void *arg, const char *s)
 			{0, "list", list},
 			{1, "load", load},
 			{1, "insert", insert},
+<<<<<<< Updated upstream
 			{1, "remove", remove},
+=======
+			{1, "remove", remove_},
+>>>>>>> Stashed changes
 			{1, "exists", exists}};
 	struct avl *avl;
 	uint64_t i;

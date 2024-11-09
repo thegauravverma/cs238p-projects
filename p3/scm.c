@@ -35,13 +35,32 @@ struct initmem
   uint8_t checksum; /* Checksum function */
 };
 
+<<<<<<< Updated upstream
+=======
+/* Metadata structure for tracking freeblocks */
+struct memblock
+{
+  uint8_t size; /* Size for the block */
+  uint8_t used; /* 1 if in use, 0 if not */
+};
+
+/* Sets the file size and updates available memory in scm */
+>>>>>>> Stashed changes
 void set_file_size(struct scm *scm)
 {
   /* Check that the file's open */
   struct stat st;
+<<<<<<< Updated upstream
   if (fstat(scm->fd, &st) == -1)
   {
     TRACE("Failed to stat file");
+=======
+
+  /* Check if file is open */
+  if (fstat(scm->fd, &st) == -1)
+  {
+    TRACE("Failed to open file");
+>>>>>>> Stashed changes
     exit(EXIT_FAILURE); /* Exit if fstat fails */
   }
 
@@ -50,6 +69,11 @@ void set_file_size(struct scm *scm)
     TRACE("Error: Not a regular file");
     exit(EXIT_FAILURE);
   }
+<<<<<<< Updated upstream
+=======
+
+  /* Align the file size and set available memory */
+>>>>>>> Stashed changes
   scm->available_memory = descriptor_align(st.st_size);
 
   if (scm->available_memory < 1)
@@ -139,8 +163,24 @@ void scm_close(struct scm *scm)
     metadata->size = scm->memory_in_use;
     metadata->sign = SIGNATURE;
     metadata->checksum = SIGNATURE ^ metadata->size;
+<<<<<<< Updated upstream
     msync(scm->mem, scm->available_memory, MS_SYNC);
     munmap(scm->mem, scm->available_memory);
+=======
+    if (msync(scm->mem, scm->available_memory, MS_SYNC) == -1)
+    {
+      TRACE("msync failed");
+    }
+    if (munmap(scm->mem, scm->available_memory) == -1)
+    {
+      TRACE("munmap failed");
+    }
+    if (close(scm->fd) == -1)
+    {
+      TRACE("close failed");
+    }
+    free(scm);
+>>>>>>> Stashed changes
   }
   if (scm->fd)
   {
@@ -157,10 +197,48 @@ void *check_free_list(struct scm *scm, size_t N)
   return NULL;
 }
 
+<<<<<<< Updated upstream
+=======
+/* Finds a free block if one exists */
+void *get_free_block(struct scm *scm, size_t N)
+{
+  struct memblock *meta;
+
+  TRACE("Trying to get the ptr");
+
+  meta = (struct memblock *)((char *)scm_mbase(scm) - sizeof(struct memblock));
+  while (1)
+  {
+    if ((meta->size >= N) && (meta->used == 0))
+    {
+      meta->used = 1;
+
+      TRACE("Found one!");
+      return (void *)((char *)meta + sizeof(struct memblock));
+    }
+
+    /* If we can't find another chunk of memory after this one that has enough space to store both a memblock */
+    /* and the space we need, we need to exit out; We're truly out of luck. */
+    TRACE("Doing the beegmath");
+    if ((char *)meta + sizeof(struct memblock) + meta->size + sizeof(struct memblock) + N > (char *)scm->mem + sizeof(struct initmem) + scm->available_memory)
+    {
+      TRACE("Cannot find freeblock for allocation");
+      return NULL;
+    }
+
+    TRACE("Iterating ptr");
+    meta = (struct memblock *)((char *)meta + sizeof(struct memblock) + meta->size);
+  }
+}
+
+/* Allocates memory within the shared memory region */
+>>>>>>> Stashed changes
 void *scm_malloc(struct scm *scm, size_t N)
 {
+  struct memblock *meta;
   void *ptr;
 
+<<<<<<< Updated upstream
   if ((scm->memory_in_use + N) > scm->available_memory)
   {
     TRACE("Not Enough Memory for Allocation.");
@@ -172,19 +250,48 @@ void *scm_malloc(struct scm *scm, size_t N)
   ptr = (uint8_t *)scm->mem + scm->memory_in_use;
   scm->memory_in_use += N;
 
+=======
+  /* Check if there is enough available memory */
+  if ((sizeof(struct initmem) + scm->memory_in_use + N + sizeof(struct memblock)) > scm->available_memory)
+  {
+    return get_free_block(scm, N);
+  }
+
+  /* Allocate memory and update usage */
+  meta = (struct memblock *)(((char *)scm_mbase(scm) - sizeof(struct memblock)) + scm->memory_in_use);
+  meta->size = N;
+  meta->used = 1;
+
+  ptr = (char *)meta + sizeof(struct memblock);
+  scm->memory_in_use += N + sizeof(struct memblock);
+>>>>>>> Stashed changes
   return ptr;
 }
 
 char *scm_strdup(struct scm *scm, const char *s)
 {
+<<<<<<< Updated upstream
   size_t str_len;
   char *dup_str;
   size_t i;
   if (!s)
+=======
+  struct memblock *meta;
+
+  size_t n = strlen(s) + 1;
+  char *p;
+
+  /* Allocate space for the string */
+  p = scm_malloc(scm, n);
+  meta = (struct memblock *)((char *)p - sizeof(struct memblock));
+  TRACE("Getting strcpy");
+  if (!p)
+>>>>>>> Stashed changes
   {
     TRACE("Given string is NULL");
     return NULL;
   }
+<<<<<<< Updated upstream
   str_len = strlen(s) + 1;
   if (!(dup_str = scm_malloc(scm, str_len)))
   {
@@ -196,12 +303,42 @@ char *scm_strdup(struct scm *scm, const char *s)
     dup_str[i] = s[i];
   }
   return dup_str;
+=======
+
+  printf("%d\n", meta->size);
+  printf("%d\n", meta->used);
+  printf("%d\n", (int)n);
+  printf("%p\n", p);
+  printf("%s\n", s);
+
+  /* Copy the string into allocated memory */
+  memcpy(p, s, n);
+  return p;
+>>>>>>> Stashed changes
 }
 
 void scm_free(struct scm *scm, void *p)
 {
+  struct memblock *meta;
+  char *ptr;
+  int i = 0;
+
+  TRACE("FREEDING");
+  meta = (struct memblock *)((char *)p - sizeof(struct memblock));
+
+  meta->used = 0;
+
+  ptr = p;
+  for (; i < meta->size; ++i)
+  {
+    ptr[i] = 0;
+  }
+
   UNUSED(scm);
+<<<<<<< Updated upstream
   UNUSED(p);
+=======
+>>>>>>> Stashed changes
 
   return;
 }
@@ -218,7 +355,11 @@ size_t scm_capacity(const struct scm *scm)
 
 void *scm_mbase(struct scm *scm)
 {
+<<<<<<< Updated upstream
   return (uint8_t *)scm->mem;
+=======
+  return (char *)scm->mem + sizeof(struct initmem) + sizeof(struct memblock);
+>>>>>>> Stashed changes
 }
 
 /**

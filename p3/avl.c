@@ -192,7 +192,11 @@ avl_open(const char *pathname, int truncate)
 			return NULL;
 		}
 		memset(avl->state, 0, sizeof(struct state));
+<<<<<<< Updated upstream
 		assert(avl->state == scm_mbase(avl->scm));
+=======
+		/* assert(avl->state == scm_mbase(avl->scm)); */
+>>>>>>> Stashed changes
 	}
 	return avl;
 }
@@ -232,7 +236,11 @@ remove_left(struct node *root)
 	/* Initial check */
 	if (!ptr->right)
 	{
+<<<<<<< Updated upstream
 		return ptr->left;
+=======
+		return ptr;
+>>>>>>> Stashed changes
 	}
 
 	/* Get the rightmost node */
@@ -243,9 +251,18 @@ remove_left(struct node *root)
 
 	next = ptr->right->left;
 	ptr->right->left = root;
+<<<<<<< Updated upstream
 	root = ptr->right->left;
 	ptr->right = next;
 
+=======
+	root = ptr->right;
+	ptr->right = next;
+
+	root->depth = depth(root->left, root->right);
+	ptr->depth = depth(ptr->left, ptr->right);
+
+>>>>>>> Stashed changes
 	return root;
 }
 
@@ -258,25 +275,50 @@ remove_right(struct node *root)
 	/* Initial check */
 	if (!ptr->left)
 	{
+<<<<<<< Updated upstream
 		return ptr->right;
 	}
 
+=======
+		return ptr;
+	}
+
+	TRACE("Here now");
+
+>>>>>>> Stashed changes
 	/* Get the leftmost node */
 	while (ptr->left->left)
 	{
 		ptr = ptr->left;
 	}
 
+<<<<<<< Updated upstream
 	next = ptr->left->right;
 	ptr->left->right = root;
 	root = ptr->left->right;
 	ptr->left = next;
 
+=======
+	TRACE("Now here");
+
+	next = ptr->left->right;
+	ptr->left->right = root;
+	root = ptr->left;
+	ptr->left = next;
+
+	root->depth = depth(root->left, root->right);
+	ptr->depth = depth(ptr->left, ptr->right);
+
+>>>>>>> Stashed changes
 	return root;
 }
 
 static struct node *
+<<<<<<< Updated upstream
 remove(struct avl *avl, struct node *root, const char *item)
+=======
+remove_node(struct avl *avl, struct node *root, const char *item)
+>>>>>>> Stashed changes
 {
 	struct node *ptr;
 
@@ -290,33 +332,59 @@ remove(struct avl *avl, struct node *root, const char *item)
 		if (root->count > 1)
 		{
 			root->count--;
+<<<<<<< Updated upstream
+=======
+			avl->state->items--;
+>>>>>>> Stashed changes
 			return root;
 		}
 
 		if (!root->left)
 		{
 			ptr = root->right;
+<<<<<<< Updated upstream
 			scm_free(avl->scm, root->item);
 			scm_free(avl->scm, root);
+=======
+			scm_free(avl->scm, &root->item);
+			scm_free(avl->scm, root);
+			avl->state->items--;
+			avl->state->unique--;
+>>>>>>> Stashed changes
 			return ptr;
 		}
 		if (!root->right)
 		{
 			ptr = root->left;
+<<<<<<< Updated upstream
 			scm_free(avl->scm, root->item);
 			scm_free(avl->scm, root);
+=======
+			scm_free(avl->scm, &root->item);
+			scm_free(avl->scm, root);
+			avl->state->items--;
+			avl->state->unique--;
+>>>>>>> Stashed changes
 			return ptr;
 		}
 
 		/* Determine the depth difference */
+<<<<<<< Updated upstream
 		if (root->left->depth > root->right->depth)
 		{
 			/* Left side is heavier */
 			ptr = remove_left(ptr->left);
+=======
+		if (balance(root) < 0)
+		{
+			/* Left side is heavier */
+			ptr = remove_left(root->left);
+>>>>>>> Stashed changes
 			ptr->right = root->right;
 		}
 		else
 		{
+<<<<<<< Updated upstream
 			/* Right side is heavier, or equal */
 			ptr = remove_right(ptr->right);
 			ptr->left = root->left;
@@ -324,10 +392,24 @@ remove(struct avl *avl, struct node *root, const char *item)
 
 		scm_free(avl->scm, root->item);
 		scm_free(avl->scm, root);
+=======
+			TRACE("Rightleft");
+			/* Right side is heavier, or equal */
+			ptr = remove_right(root->right);
+			ptr->left = root->left;
+		}
+
+		scm_free(avl->scm, &root->item);
+		scm_free(avl->scm, root);
+		avl->state->items--;
+		avl->state->unique--;
+
+>>>>>>> Stashed changes
 		return ptr;
 	}
 	else if (strcmp(item, root->item) < 0)
 	{
+<<<<<<< Updated upstream
 		root->left = remove(avl, root->left, item);
 	}
 	else
@@ -341,6 +423,28 @@ remove(struct avl *avl, struct node *root, const char *item)
 int avl_remove(struct avl *acl, const char *item)
 {
 	struct node *root;
+=======
+		root->left = remove_node(avl, root->left, item);
+	}
+	else
+	{
+		root->right = remove_node(avl, root->right, item);
+	}
+
+	root->depth = depth(root->left, root->right);
+	return root;
+}
+
+int avl_remove(struct avl *avl, const char *item)
+{
+	assert(avl);
+	assert(safe_strlen(item));
+
+	TRACE("Removing");
+
+	avl->state->root = remove_node(avl, avl->state->root, item);
+	return 0;
+>>>>>>> Stashed changes
 }
 
 uint64_t
