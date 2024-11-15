@@ -14,6 +14,13 @@
 #define WCACHE_BLOCKS 32
 #define RCACHE_BLOCKS 256
 
+struct device
+{
+  int fd;
+  uint64_t size;  /* immutable */
+  uint64_t block; /* immutable */
+};
+
 struct logfs
 {
   void *writebuffer;          /* Buffer to write to, aligned */
@@ -29,7 +36,7 @@ struct logfs
   pthread_cond_t data_avail;  /* Flag to mark if we have data available (if we can write more to disk) */
   pthread_cond_t space_avail; /* Flag to mark if we have space available (if we can write more to buffer) */
 
-  size_t CAPACITY; /* Constant to store block device's capacity */
+  struct device *device_used; /* Device */
 
   int done; /* If we are done. For closing up threadwork */
 };
@@ -64,15 +71,71 @@ void *writer(struct logfs *logfs)
 
 struct logfs *logfs_open(const char *pathname)
 {
-  /* STUB! */
-  UNUSED(pathname);
-  return NULL;
+  struct logfs *logfs;
+
+  if (!(logfs = malloc(sizeof(struct logfs *))))
+  {
+    TRACE("Could not malloc logfs struct. ");
+    exit(1);
+  }
+
+  if (!(logfs->device_used = device_open(pathname)))
+  {
+    TRACE("^");
+    exit(1);
+  }
+
+  logfs->BLOCK_SIZE = device_block(logfs->device_used);
+  logfs->BUFFER_SIZE = WCACHE_BLOCKS * logfs->BLOCK_SIZE;
+  logfs->writebuffer_toDelete = malloc((WCACHE_BLOCKS + 1) * logfs->BLOCK_SIZE);
+  logfs->writebuffer = memory_align(logfs->writebuffer_toDelete, logfs->BLOCK_SIZE);
+
+  logfs->head = logfs->writebuffer;
+  logfs->tail = logfs->writebuffer;
+
+  if (pthread_create(logfs->writer, NULL /* TODO: Find attributes */, writer, logfs))
+  {
+    TRACE("Failed to create writer thread.");
+    exit(1);
+  }
+
+  if (pthread_mutex_init(&logfs->lock, NULL /* TODO: Find attributes */))
+  {
+    TRACE("Failed to create threadlock.");
+    exit(1);
+  }
+
+  if (pthread_cond_init(&logfs->data_avail, NULL /* TODO: Find attributes */))
+  {
+    TRACE("Failed to create data_avail condition.");
+    exit(1);
+  }
+
+  if (pthread_cond_init(&logfs->space_avail, NULL /* TODO: Find attributes */))
+  {
+    TRACE("Failed to create space_avail condition.");
+    exit(1);
+  }
+
+  logfs->done = 0;
+
+  return logfs;
 }
 
 void logfs_close(struct logfs *logfs)
 {
-  /* STUB! */
-  UNUSED(logfs);
+  logfs->done = 1;
+  pthread_cond_signal(&logfs->data_avail);
+  pthread_join(logfs->writer, NULL);
+
+  pthread_cond_destroy(&logfs->data_avail);
+  pthread_cond_destroy(&logfs->space_avail);
+
+  pthread_mutex_destroy(&logfs->lock);
+  pthread_destroy(&logfs->writer);
+
+  free(logfs->writebuffer_toDelete);
+  free(logfs);
 }
 
 int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
@@ -89,7 +152,7 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
 
 int logfs_append(struct logfs *logfs, const void *buf, uint64_t len)
 {
-  if (logfs->head + len > logfs->CAPACITY)
+  if ((logfs->head + len) > logfs->device_used->size)
   {
     /* Error! No capacity */
   }
