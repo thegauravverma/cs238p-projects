@@ -109,3 +109,9 @@ shift(const void *p, size_t off)
 {
 	return (void *)(((char *)p) + off);
 }
+
+size_t
+get_block(size_t off, size_t block_size)
+{
+	return off / block_size;
+}
