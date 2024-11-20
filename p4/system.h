@@ -76,4 +76,6 @@ void *memory_align(void *p, size_t n);
 
 void *shift(const void *p, size_t off);
 
+size_t get_block(size_t off, size_t block_size);
+
 #endif /* _SYSTEM_H_ */
