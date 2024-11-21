@@ -83,11 +83,6 @@ void *writer(void *arg)
     TRACE("Entering loop...");
     if (size(logfs) < logfs->BLOCK_SIZE)
     {
-      if (flush(logfs))
-      {
-        TRACE(0);
-        return NULL;
-      }
       TRACE("Entering wait...");
       pthread_cond_wait(&logfs->data_avail, &logfs->lock);
       continue;
@@ -234,8 +229,14 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
   3)   if blk not in readbuffer, copy it to readbuffer
   4)   read from readbuffer to buf
   */
-  uint64_t currlen = 0;
-  uint64_t currblock = get_block(off, logfs->BLOCK_SIZE);
+  uint64_t currlen, currblock;
+  if (flush(logfs))
+  {
+    TRACE("Flush failed during read.");
+    return -1;
+  }
+  currlen = 0;
+  currblock = get_block(off, logfs->BLOCK_SIZE);
 
   TRACE("Reading");
 
@@ -296,6 +297,7 @@ int logfs_append(struct logfs *logfs, const void *buf, uint64_t len)
     TRACE("Cannot write further to the device.");
     return 1;
   }
+  pthread_mutex_lock(&logfs->lock);
 
   assert(len <= logfs->BUFFER_SIZE);
   for (;;)
@@ -323,7 +325,8 @@ int logfs_append(struct logfs *logfs, const void *buf, uint64_t len)
   }
 
   logfs->head += len;
-
+  pthread_cond_signal(&logfs->data_avail); 
+  pthread_mutex_unlock(&logfs->lock);
   return 0;
 }
 
