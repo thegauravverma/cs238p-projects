@@ -48,7 +48,28 @@ struct logfs
 
 size_t size(struct logfs *logfs)
 {
-  return (logfs->head - logfs->tail) % WCACHE_BLOCKS;
+  return (logfs->head - logfs->tail) % (WCACHE_BLOCKS * logfs->BLOCK_SIZE);
+}
+
+int flush(struct logfs *logfs)
+{
+  TRACE("Entering flush...");
+  assert(logfs->head - logfs->tail < logfs->BLOCK_SIZE); /* We only want to flush when we're otherwise up to date */
+  if (logfs->head == logfs->tail)
+  {
+    /* Aligned; No need to flush. We've already written it. */
+    return 0;
+  }
+
+  TRACE("We need to flush...");
+  if (device_write(logfs->device, logfs->writebuffer, logfs->tail % logfs->BUFFER_SIZE, logfs->BLOCK_SIZE))
+  {
+    TRACE(0);
+    return 1;
+  }
+
+  TRACE("Flushed.");
+  return 0;
 }
 
 void *writer(void *arg)
@@ -56,18 +77,29 @@ void *writer(void *arg)
   struct logfs *logfs = (struct logfs *)arg;
 
   pthread_mutex_lock(&logfs->lock);
+  TRACE("Acquired lock.");
   while (!logfs->done)
   {
+    TRACE("Entering loop...");
     if (size(logfs) < logfs->BLOCK_SIZE)
     {
-      /* TODO: Can we flush here? SHOULD we flush here? */
+      if (flush(logfs))
+      {
+        TRACE(0);
+        return NULL;
+      }
+      TRACE("Entering wait...");
       pthread_cond_wait(&logfs->data_avail, &logfs->lock);
       continue;
     }
 
-    device_write(logfs->device, shift(logfs->writebuffer, (logfs->tail % logfs->BUFFER_SIZE)), logfs->tail, logfs->BLOCK_SIZE);
+    if (device_write(logfs->device, logfs->writebuffer, logfs->tail % logfs->BUFFER_SIZE, logfs->BLOCK_SIZE))
+    {
+      TRACE(0);
+      return NULL;
+    }
     logfs->tail += logfs->BLOCK_SIZE;
-
+    TRACE("Wrote a block (sunglasses emoji)");
     pthread_cond_signal(&logfs->space_avail);
   }
 
@@ -96,15 +128,31 @@ struct logfs *logfs_open(const char *pathname)
   logfs->BLOCK_SIZE = device_block(logfs->device);
   logfs->BUFFER_SIZE = WCACHE_BLOCKS * logfs->BLOCK_SIZE;
 
-  logfs->writebuffer_toDelete = malloc((WCACHE_BLOCKS + 1) * logfs->BLOCK_SIZE);
+  if (!(logfs->writebuffer_toDelete = malloc((WCACHE_BLOCKS + 1) * logfs->BLOCK_SIZE)))
+  {
+    TRACE("Failed to malloc write buffer. ");
+    exit(1);
+  }
   logfs->writebuffer = memory_align(logfs->writebuffer_toDelete, logfs->BLOCK_SIZE);
 
-  logfs->readbuffer_toDelete = malloc((RCACHE_BLOCKS + 1) * logfs->BLOCK_SIZE);
+  if (!(logfs->readbuffer_toDelete = malloc((RCACHE_BLOCKS + 1) * logfs->BLOCK_SIZE)))
+  {
+    TRACE("Failed to malloc read buffer. ");
+    exit(1);
+  }
   logfs->readbuffer = memory_align(logfs->readbuffer_toDelete, logfs->BLOCK_SIZE);
 
   /* Initializing the labels for each blockslot */
-  logfs->readblock_check = malloc(RCACHE_BLOCKS * sizeof(uint64_t));
-  logfs->readblock_valid = malloc(RCACHE_BLOCKS * sizeof(uint8_t));
+  if (!(logfs->readblock_check = malloc(RCACHE_BLOCKS * sizeof(uint64_t))))
+  {
+    TRACE("Failed to malloc read buffer block tracking.");
+  }
+
+  if (!(logfs->readblock_valid = malloc(RCACHE_BLOCKS * sizeof(uint8_t))))
+  {
+    TRACE("Failed to malloc read buffer valid tracking.");
+  }
+
   for (i = 0; i < RCACHE_BLOCKS; ++i)
   {
     logfs->readblock_check[i] = 0;
@@ -171,11 +219,9 @@ void cache_miss(struct logfs *logfs, uint64_t block)
   {
     /* Error and exit */
   }
-  else
-  {
-    logfs->readblock_check[block % RCACHE_BLOCKS] = block;
-    logfs->readblock_valid[block % RCACHE_BLOCKS] = 1;
-  }
+
+  logfs->readblock_check[block % RCACHE_BLOCKS] = block;
+  logfs->readblock_valid[block % RCACHE_BLOCKS] = 1;
   /* Else we did it */
 }
 
@@ -191,6 +237,8 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
   uint64_t currlen = 0;
   uint64_t currblock = get_block(off, logfs->BLOCK_SIZE);
 
+  TRACE("Reading");
+
   /* Check for cache miss on initial block */
   if (!logfs->readblock_valid[currblock % RCACHE_BLOCKS] || logfs->readblock_check[currblock % RCACHE_BLOCKS] != currblock)
   {
@@ -198,26 +246,29 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
   }
 
   /* Initial block - if we don't need to get to the end of the block */
-  if (currblock == get_block(off + len, logfs->BLOCK_SIZE))
+  if (currblock == get_block(off + len - 1, logfs->BLOCK_SIZE))
   {
-    memcpy(buf, shift(logfs->readbuffer, off), len);
+    TRACE("Getting here");
+    memcpy(buf, shift(logfs->readbuffer, off % logfs->BUFFER_SIZE), len);
     return 0; /* Done */
   }
 
   /* Initial block - Otherwise we need to get to the end of the block */
-  memcpy(buf, shift(logfs->readbuffer, off), logfs->BLOCK_SIZE - (off % logfs->BLOCK_SIZE));
-  currlen += off % logfs->BLOCK_SIZE;
+  memcpy(buf, shift(logfs->readbuffer, off % logfs->BUFFER_SIZE), logfs->BLOCK_SIZE - (off % logfs->BLOCK_SIZE));
+  currlen += logfs->BLOCK_SIZE - (off % logfs->BLOCK_SIZE);
   ++currblock;
 
+  TRACE("Reading...");
   while (currlen + logfs->BLOCK_SIZE <= len)
   {
+    TRACE("While Loop");
     /* We can copy a full block */
     if (!logfs->readblock_valid[currblock % RCACHE_BLOCKS] || logfs->readblock_check[currblock % RCACHE_BLOCKS] != currblock)
     {
       cache_miss(logfs, currblock);
     }
 
-    memcpy(shift(buf, currlen), shift(logfs->readbuffer, off + currlen), logfs->BLOCK_SIZE);
+    memcpy(shift(buf, currlen), shift(logfs->readbuffer, (off + currlen) % logfs->BUFFER_SIZE), logfs->BLOCK_SIZE);
     currlen += logfs->BLOCK_SIZE;
     ++currblock;
   }
@@ -233,15 +284,17 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
     cache_miss(logfs, currblock);
   }
 
-  memcpy(shift(buf, currlen), shift(logfs->readbuffer, off + currlen), len - currlen);
+  memcpy(shift(buf, currlen), shift(logfs->readbuffer, (off + currlen) % logfs->BUFFER_SIZE), len - currlen);
   return 0;
 }
 
 int logfs_append(struct logfs *logfs, const void *buf, uint64_t len)
 {
+  TRACE("Appending...");
   if ((logfs->head + len) > logfs->device->size)
   {
-    /* Error! No capacity */
+    TRACE("Cannot write further to the device.");
+    return 1;
   }
 
   assert(len <= logfs->BUFFER_SIZE);
@@ -249,28 +302,29 @@ int logfs_append(struct logfs *logfs, const void *buf, uint64_t len)
   {
     if ((logfs->BUFFER_SIZE - size(logfs)) < len)
     {
+      TRACE("Need to write further");
       pthread_cond_wait(&logfs->space_avail, &logfs->lock);
       continue;
     }
     break;
   }
 
+  TRACE("Need to check append");
   if ((logfs->head % logfs->BUFFER_SIZE) + len > logfs->BUFFER_SIZE)
   {
+    TRACE("Entering double case");
     memcpy(shift(logfs->writebuffer, (logfs->head % logfs->BUFFER_SIZE)), buf, logfs->BUFFER_SIZE - (logfs->head % logfs->BUFFER_SIZE));
     memcpy(logfs->writebuffer, shift(buf, logfs->BUFFER_SIZE - (logfs->head % logfs->BUFFER_SIZE)), len + (logfs->head % logfs->BUFFER_SIZE) - logfs->BUFFER_SIZE);
   }
   else
   {
-    memcpy(shift(logfs->writebuffer, (logfs->head % logfs->BUFFER_SIZE)), logfs->writebuffer, len);
+    TRACE("Entering single case");
+    memcpy(shift(logfs->writebuffer, (logfs->head % logfs->BUFFER_SIZE)), buf, len);
   }
 
   logfs->head += len;
 
-  pthread_cond_signal(&logfs->data_avail);
-  pthread_mutex_unlock(&logfs->lock);
-
-  return 1;
+  return 0;
 }
 
 /**
