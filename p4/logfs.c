@@ -53,23 +53,39 @@ size_t size(struct logfs *logfs)
 
 int flush(struct logfs *logfs)
 {
-  TRACE("Entering flush...");
-  assert(logfs->head - logfs->tail < logfs->BLOCK_SIZE); /* We only want to flush when we're otherwise up to date */
-  if (logfs->head == logfs->tail)
-  {
-    /* Aligned; No need to flush. We've already written it. */
+    uint64_t original_head,original_tail;
+    size_t pending_size;
+    pthread_mutex_lock(&logfs->lock);
+    TRACE("Entering flush...");
+    pending_size = logfs->head - logfs->tail;
+      printf("%ld\n",size(logfs));
+
+    if (pending_size == 0)
+    {
+        /* No data to flush*/
+        pthread_mutex_unlock(&logfs->lock);
+        return 0;
+    }
+
+    assert(pending_size < logfs->BLOCK_SIZE); /*Only flush when pending data is less than a block*/ 
+
+    original_head = logfs->head;
+    original_tail = logfs->tail;
+
+    logfs->head = logfs->tail + logfs->BLOCK_SIZE;
+    while (size(logfs) >= logfs->BLOCK_SIZE)
+    {
+        pthread_cond_signal(&logfs->data_avail);
+        pthread_cond_wait(&logfs->space_avail, &logfs->lock);
+    }
+
+    logfs->head = original_head;
+    logfs->tail = original_tail;
+
+    pthread_mutex_unlock(&logfs->lock);
+
+    TRACE("Flushed.");
     return 0;
-  }
-
-  TRACE("We need to flush...");
-  if (device_write(logfs->device, logfs->writebuffer, logfs->tail % logfs->BUFFER_SIZE, logfs->BLOCK_SIZE))
-  {
-    TRACE(0);
-    return 1;
-  }
-
-  TRACE("Flushed.");
-  return 0;
 }
 
 void *writer(void *arg)
@@ -88,10 +104,10 @@ void *writer(void *arg)
       continue;
     }
 
-    if (device_write(logfs->device, logfs->writebuffer, logfs->tail % logfs->BUFFER_SIZE, logfs->BLOCK_SIZE))
+    if (device_write(logfs->device, logfs->writebuffer, logfs->tail % logfs->BUFFER_SIZE, logfs->BLOCK_SIZE) == -1)
     {
-      TRACE(0);
-      return NULL;
+      TRACE("ERROR DEVICE WRITE");
+      EXIT(0);
     }
     logfs->tail += logfs->BLOCK_SIZE;
     TRACE("Wrote a block (sunglasses emoji)");
