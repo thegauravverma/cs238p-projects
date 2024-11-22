@@ -53,39 +53,35 @@ size_t size(struct logfs *logfs)
 
 int flush(struct logfs *logfs)
 {
-    uint64_t original_head,original_tail;
-    size_t pending_size;
-    pthread_mutex_lock(&logfs->lock);
-    TRACE("Entering flush...");
-    pending_size = logfs->head - logfs->tail;
-      printf("%ld\n",size(logfs));
+  uint64_t original_head = logfs->head;
+  uint64_t original_tail = logfs->tail;
+  size_t pending_size = logfs->head - logfs->tail;
+  pthread_mutex_lock(&logfs->lock);
+  TRACE("Entering flush...");
+  printf("%ld\n", size(logfs));
 
-    if (pending_size == 0)
-    {
-        /* No data to flush*/
-        pthread_mutex_unlock(&logfs->lock);
-        return 0;
-    }
-
-    assert(pending_size < logfs->BLOCK_SIZE); /*Only flush when pending data is less than a block*/ 
-
-    original_head = logfs->head;
-    original_tail = logfs->tail;
-
-    logfs->head = logfs->tail + logfs->BLOCK_SIZE;
-    while (size(logfs) >= logfs->BLOCK_SIZE)
-    {
-        pthread_cond_signal(&logfs->data_avail);
-        pthread_cond_wait(&logfs->space_avail, &logfs->lock);
-    }
-
-    logfs->head = original_head;
-    logfs->tail = original_tail;
-
+  if (pending_size == 0)
+  {
+    /* No data to flush*/
     pthread_mutex_unlock(&logfs->lock);
-
-    TRACE("Flushed.");
     return 0;
+  }
+
+  logfs->head += logfs->BLOCK_SIZE - pending_size;
+  assert(logfs->head % logfs->BLOCK_SIZE == 0);
+  while (size(logfs) != 0)
+  {
+    pthread_cond_signal(&logfs->data_avail);
+    pthread_cond_wait(&logfs->space_avail, &logfs->lock);
+  }
+
+  logfs->head = original_head;
+  logfs->tail = original_tail;
+
+  pthread_mutex_unlock(&logfs->lock);
+
+  TRACE("Flushed.");
+  return 0;
 }
 
 void *writer(void *arg)
@@ -228,7 +224,8 @@ void cache_miss(struct logfs *logfs, uint64_t block)
   void *readbuffer_block = shift(logfs->readbuffer, (block % RCACHE_BLOCKS) * logfs->BLOCK_SIZE);
   if (device_read(logfs->device, readbuffer_block, block * logfs->BLOCK_SIZE, logfs->BLOCK_SIZE))
   {
-    /* Error and exit */
+    TRACE(0);
+    exit(1);
   }
 
   logfs->readblock_check[block % RCACHE_BLOCKS] = block;
@@ -259,6 +256,7 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
   /* Check for cache miss on initial block */
   if (!logfs->readblock_valid[currblock % RCACHE_BLOCKS] || logfs->readblock_check[currblock % RCACHE_BLOCKS] != currblock)
   {
+    TRACE("Cache miss!");
     cache_miss(logfs, currblock);
   }
 
@@ -341,7 +339,7 @@ int logfs_append(struct logfs *logfs, const void *buf, uint64_t len)
   }
 
   logfs->head += len;
-  pthread_cond_signal(&logfs->data_avail); 
+  pthread_cond_signal(&logfs->data_avail);
   pthread_mutex_unlock(&logfs->lock);
   return 0;
 }
