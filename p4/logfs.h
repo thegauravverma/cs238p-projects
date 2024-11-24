@@ -14,6 +14,9 @@
 
 struct logfs;
 
+/* Gives head - tail; For debug */
+size_t logfs_size(struct logfs *logfs);
+
 /**
  * Opens the block device specified in pathname for buffered I/O using an
  * append only log structure.

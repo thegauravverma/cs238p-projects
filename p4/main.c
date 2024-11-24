@@ -216,7 +216,7 @@ basicer_logic(void)
 {
 	char *buf;
 	struct logfs *logfs;
-	buf = malloc(sizeof(char) * 50);
+	buf = malloc(sizeof(char) * 12);
 	logfs = logfs_open("block_device");
 	logfs_append(logfs, "Hello", 6);
 	logfs_read(logfs, buf, 0, 6);
@@ -224,7 +224,7 @@ basicer_logic(void)
 
 	logfs_append(logfs, "World", 6);
 	logfs_read(logfs, buf, 0, 12);
-	printf("Second: [%s]\n", buf);
+	printf("Second: [%s%s]\n", buf, (char *)shift(buf, 6));
 
 	logfs_close(logfs);
 	return 0;
@@ -391,13 +391,13 @@ int main(int argc, char *argv[])
 
 	TEST(basicer_logic, "basicer_logic");
 	TEST(basic_logic, "basic_logic");
+	TEST(heavy_rewrite, "heavy_rewrite");
 	/**/
-	UNUSED(heavy_rewrite);
 	UNUSED(read_write_single);
 	UNUSED(read_write_small);
 	UNUSED(read_write_large);
 
-	/*	TEST(heavy_rewrite, "heavy_rewrite");
+	/*
 	TEST(read_write_single, "read_write_single");
 	TEST(read_write_small, "read_write_small");
 	TEST(read_write_large, "read_write_large");
