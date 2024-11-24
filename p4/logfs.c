@@ -59,15 +59,10 @@ size_t logfs_size(struct logfs *logfs)
 
 
 
-void logfs_flush_data_to_device(struct logfs *logfs, uint64_t start, uint64_t end)
+void data_to_device(struct logfs *logfs, uint64_t start, uint64_t end)
 {
-    void *temp_mem;
-    void *temp_mem_to_delete;
-    uint64_t len;
-    uint64_t rem_len;
-    uint64_t block_off;
-    uint64_t rem_bytes;
-
+    void *temp_mem, *temp_mem_to_delete;
+    uint64_t len, rem_len,block_off,rem_bytes;
     if (start == end)
     {
         return;
@@ -109,7 +104,7 @@ void logfs_flush_data_to_device(struct logfs *logfs, uint64_t start, uint64_t en
         len = end - start;
         memcpy(temp_mem, (void *)start, len);
 
-        logfs_flush_data_to_device(logfs, (uint64_t)temp_mem, (uint64_t)temp_mem + len);
+        data_to_device(logfs, (uint64_t)temp_mem, (uint64_t)temp_mem + len);
 
         FREE(temp_mem_to_delete);
         return;
@@ -127,21 +122,6 @@ void logfs_flush_data_to_device(struct logfs *logfs, uint64_t start, uint64_t en
 }
 
 
-int logfs_flush(struct logfs *logfs)
-{
-    uint64_t head_ptr = logfs->head;
-    if (head_ptr < logfs->tail)
-    {
-        logfs_flush_data_to_device(logfs, logfs->tail, logfs->writerEnd);
-        logfs_flush_data_to_device(logfs, (uint64_t)logfs->writebuffer, head_ptr);
-        logfs->tail = head_ptr;
-        return 0;
-    }
-    logfs_flush_data_to_device(logfs, logfs->tail, head_ptr);
-    logfs->tail = head_ptr;
-    return 0;
-}
-
 void *writer(void *arg)
 {
   struct logfs *logfs = (struct logfs *)arg;
@@ -151,8 +131,15 @@ void *writer(void *arg)
     while((!logfs->done) && !logfs->is_writing) {
       pthread_cond_wait(&logfs->data_avail,&logfs->lock);
     }
-
-    logfs_flush(logfs);
+    if (logfs->head < logfs->tail)
+    {
+        data_to_device(logfs, logfs->tail, logfs->writerEnd);
+        data_to_device(logfs, (uint64_t)logfs->writebuffer, logfs->head);
+        logfs->tail = logfs->head;
+    }
+    data_to_device(logfs, logfs->tail, logfs->head);
+    logfs->tail = logfs->head;
+    
 
     logfs->is_writing = 0;
     logfs->is_reading = 1;
