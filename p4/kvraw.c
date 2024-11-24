@@ -124,8 +124,6 @@ int kvraw_lookup(struct kvraw *kvraw,
 		TRACE(0);
 		return -1;
 	}
-	TRACE((char *)key);
-	TRACE((char *)val);
 	(*key_len) = meta.key_len;
 	(*val_len) = meta.val_len;
 	(*off) = meta.off;
