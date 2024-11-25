@@ -227,6 +227,7 @@ basicer_logic(void)
 	printf("Second: [%s%s]\n", buf, (char *)shift(buf, 6));
 
 	logfs_close(logfs);
+	free(buf);
 	return 0;
 }
 
@@ -395,12 +396,6 @@ int main(int argc, char *argv[])
 	TEST(read_write_small, "read_write_small");
 	TEST(read_write_large, "read_write_large");
 	TEST(heavy_rewrite, "heavy_rewrite");
-
-	/*
-	TEST(read_write_single, "read_write_single");
-	TEST(read_write_small, "read_write_small");
-	TEST(read_write_large, "read_write_large");
-*/
 
 	/* postlude */
 

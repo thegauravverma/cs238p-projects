@@ -49,6 +49,7 @@ struct logfs
 
 size_t logfs_size(struct logfs *logfs)
 {
+  /* We don't mod here. No need. */
   return logfs->head - logfs->tail;
 }
 
@@ -224,12 +225,14 @@ void logfs_close(struct logfs *logfs)
   pthread_cond_destroy(&logfs->space_avail);
 
   pthread_mutex_destroy(&logfs->lock);
-  /*pthread_???(&logfs->writer);*/
+  pthread_detach(logfs->writer);
 
   free(logfs->writebuffer_toDelete);
   free(logfs->readbuffer_toDelete);
   free(logfs->readblock_check);
   free(logfs->readblock_valid);
+
+  device_close(logfs->device);
 
   free(logfs);
 }
