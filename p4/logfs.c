@@ -62,12 +62,15 @@ int flush(struct logfs *logfs)
   /* We're going to fully write before flushing to preserve the tail correctly! */
   while (logfs_size(logfs) >= logfs->BLOCK_SIZE)
   {
+    TRACE("Waiting on writer for further flushing...");
     pthread_cond_signal(&logfs->data_avail);
     pthread_cond_wait(&logfs->space_avail, &logfs->lock);
+    TRACE("Waiting complete!");
   }
 
   original_head = logfs->head;
   original_tail = logfs->tail;
+  printf("Tail: %ld\n", logfs->tail);
   pending_size = logfs->head - logfs->tail;
 
   if (pending_size == 0)
@@ -229,7 +232,7 @@ void logfs_close(struct logfs *logfs)
 void cache_miss(struct logfs *logfs, uint64_t block)
 {
   /* Copy over the device block to the readbuffer */
-  if (device_read(logfs->device, logfs->readbuffer, block * logfs->BLOCK_SIZE % logfs->RBUFFER_SIZE, logfs->BLOCK_SIZE))
+  if (device_read(logfs->device, shift(logfs->readbuffer, (block * logfs->BLOCK_SIZE) % logfs->RBUFFER_SIZE), block * logfs->BLOCK_SIZE, logfs->BLOCK_SIZE))
   {
     TRACE(0);
     exit(1);
@@ -253,10 +256,12 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
 
   currlen = 0;
   currblock = get_block(off, logfs->BLOCK_SIZE);
+  printf("Currblock: %ld\n", currblock);
 
   /* Check for cache miss on initial block */
   if (currblock == get_block(logfs->head, logfs->BLOCK_SIZE) || !logfs->readblock_valid[currblock % RCACHE_BLOCKS] || logfs->readblock_check[currblock % RCACHE_BLOCKS] != currblock)
   {
+    printf("CompareBlock: %ld\n", get_block(logfs->head, logfs->BLOCK_SIZE));
     cache_miss(logfs, currblock);
   }
 
@@ -268,9 +273,16 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
   }
 
   /* Initial block - Otherwise we need to get to the end of the block */
+  printf("Off: %ld, CurrLen: %ld, Len: %ld, RBUFFER_SIZE: %ld\n", off, currlen, len, logfs->RBUFFER_SIZE);
   memcpy(buf, shift(logfs->readbuffer, off % logfs->RBUFFER_SIZE), logfs->BLOCK_SIZE - (off % logfs->BLOCK_SIZE));
   currlen += logfs->BLOCK_SIZE - (off % logfs->BLOCK_SIZE);
   ++currblock;
+  if (*(char *)(buf) == '\0')
+  {
+    TRACE("First letter is null! Off by one!!");
+  }
+  TRACE((char *)buf);
+  printf("Buffer: %.*s\n", (int)(logfs->BLOCK_SIZE), (char *)logfs->writebuffer);
 
   TRACE("Reading...");
   while (currlen + logfs->BLOCK_SIZE <= len)
@@ -299,9 +311,11 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
 
   if (!logfs->readblock_valid[currblock % RCACHE_BLOCKS] || logfs->readblock_check[currblock % RCACHE_BLOCKS] != currblock)
   {
+    TRACE("Cache missing in last thing");
     cache_miss(logfs, currblock);
   }
 
+  printf("Read buffer offset: %.*s\n", (int)(len - currlen), (char *)shift(logfs->readbuffer, (off + currlen) % logfs->RBUFFER_SIZE));
   printf("Off: %ld, CurrLen: %ld, Len: %ld, RBUFFER_SIZE: %ld\n", off, currlen, len, logfs->RBUFFER_SIZE);
   memcpy(shift(buf, currlen), shift(logfs->readbuffer, (off + currlen) % logfs->RBUFFER_SIZE), len - currlen);
   TRACE((char *)buf);
@@ -342,7 +356,7 @@ int logfs_append(struct logfs *logfs, const void *buf, uint64_t len)
     TRACE("Entering single case");
     memcpy(shift(logfs->writebuffer, (logfs->head % logfs->WBUFFER_SIZE)), buf, len);
     TRACE((char *)shift(logfs->writebuffer, logfs->head));
-    printf("We just wrote that to offset %ld\n", logfs->head);
+    printf("We just wrote %.*s to offset %ld\n", (int)len, (char *)buf, logfs->head);
   }
 
   logfs->head += len;
