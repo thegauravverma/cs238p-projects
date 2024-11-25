@@ -110,7 +110,7 @@ void *writer(void *arg)
       continue;
     }
 
-    if (device_write(logfs->device, shift(logfs->writebuffer, logfs->tail % logfs->WBUFFER_SIZE), logfs->tail % logfs->WBUFFER_SIZE, logfs->BLOCK_SIZE) == -1)
+    if (device_write(logfs->device, shift(logfs->writebuffer, logfs->tail % logfs->WBUFFER_SIZE), logfs->tail, logfs->BLOCK_SIZE) == -1)
     {
       TRACE(0);
       exit(1);
@@ -263,10 +263,6 @@ void printBuffer(const void *buf, int len)
 int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
 {
   uint64_t currlen, currblock;
-  if (logfs->head > logfs->WBUFFER_SIZE)
-  {
-    printf("Head: %ld\n", logfs->head);
-  }
   if (flush(logfs))
   {
     TRACE("Flush failed during read.");
@@ -296,7 +292,6 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
 
   while (currlen + logfs->BLOCK_SIZE <= len)
   {
-    TRACE("Entering while loop");
     /* We can copy a full block */
     if (!logfs->readblock_valid[currblock % RCACHE_BLOCKS] || logfs->readblock_check[currblock % RCACHE_BLOCKS] != currblock)
     {
@@ -308,11 +303,6 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
     ++currblock;
   }
 
-  if (logfs->head > logfs->WBUFFER_SIZE)
-  {
-    TRACE("Last bit of data");
-  }
-
   /* Getting the last bit of data, not a full block (because of the above), if not nothing */
   if (currlen == len)
   {
@@ -321,19 +311,13 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
 
   if (!logfs->readblock_valid[currblock % RCACHE_BLOCKS] || logfs->readblock_check[currblock % RCACHE_BLOCKS] != currblock)
   {
-    if (logfs->head > logfs->WBUFFER_SIZE)
-    {
-      TRACE("Cache missing after buffer");
-    }
     cache_miss(logfs, currblock);
   }
 
   if ((logfs->head % logfs->RBUFFER_SIZE) + len > logfs->RBUFFER_SIZE)
   {
-    TRACE("Entering double case");
     memcpy(shift(buf, currlen), shift(logfs->readbuffer, (off + currlen % logfs->RBUFFER_SIZE)), logfs->RBUFFER_SIZE - (logfs->head % logfs->RBUFFER_SIZE));
     memcpy(shift(buf, currlen + logfs->RBUFFER_SIZE - (logfs->head % logfs->RBUFFER_SIZE)), logfs->readbuffer, len - logfs->RBUFFER_SIZE + (logfs->head % logfs->RBUFFER_SIZE));
-    printBuffer(buf, len);
   }
   else
   {
@@ -365,11 +349,8 @@ int logfs_append(struct logfs *logfs, const void *buf, uint64_t len)
 
   if ((logfs->head % logfs->WBUFFER_SIZE) + len > logfs->WBUFFER_SIZE)
   {
-    TRACE("Entering double case");
     memcpy(shift(logfs->writebuffer, (logfs->head % logfs->WBUFFER_SIZE)), buf, logfs->WBUFFER_SIZE - (logfs->head % logfs->WBUFFER_SIZE));
-    printBuffer(shift(logfs->writebuffer, (logfs->head % logfs->WBUFFER_SIZE)), logfs->WBUFFER_SIZE - (logfs->head % logfs->WBUFFER_SIZE));
     memcpy(logfs->writebuffer, shift(buf, logfs->WBUFFER_SIZE - (logfs->head % logfs->WBUFFER_SIZE)), len + (logfs->head % logfs->WBUFFER_SIZE) - logfs->WBUFFER_SIZE);
-    printBuffer(logfs->writebuffer, len + (logfs->head % logfs->WBUFFER_SIZE) - logfs->WBUFFER_SIZE);
   }
   else
   {
