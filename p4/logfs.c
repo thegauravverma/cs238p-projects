@@ -144,7 +144,7 @@ struct logfs *logfs_open(const char *pathname)
 
   if (!(logfs->device = device_open(pathname)))
   {
-    TRACE("^");
+    TRACE(0);
     exit(1);
   }
 
@@ -177,6 +177,7 @@ struct logfs *logfs_open(const char *pathname)
     TRACE("Failed to malloc read buffer valid tracking.");
   }
 
+  /* We want to pre-fill the read_cache for cache missing */
   for (i = 0; i < RCACHE_BLOCKS; ++i)
   {
     logfs->readblock_check[i] = 0;
@@ -186,25 +187,25 @@ struct logfs *logfs_open(const char *pathname)
   logfs->head = 0;
   logfs->tail = 0;
 
-  if (pthread_create(&logfs->writer, NULL /* TODO: Find attributes */, writer, logfs))
+  if (pthread_create(&logfs->writer, NULL, writer, logfs))
   {
     TRACE("Failed to create writer thread.");
     exit(1);
   }
 
-  if (pthread_mutex_init(&logfs->lock, NULL /* TODO: Find attributes */))
+  if (pthread_mutex_init(&logfs->lock, NULL))
   {
     TRACE("Failed to create threadlock.");
     exit(1);
   }
 
-  if (pthread_cond_init(&logfs->data_avail, NULL /* TODO: Find attributes */))
+  if (pthread_cond_init(&logfs->data_avail, NULL))
   {
     TRACE("Failed to create data_avail condition.");
     exit(1);
   }
 
-  if (pthread_cond_init(&logfs->space_avail, NULL /* TODO: Find attributes */))
+  if (pthread_cond_init(&logfs->space_avail, NULL))
   {
     TRACE("Failed to create space_avail condition.");
     exit(1);
@@ -246,21 +247,9 @@ void cache_miss(struct logfs *logfs, uint64_t block)
     exit(1);
   }
 
+  /* We moved to cache; We've got it! */
   logfs->readblock_check[block % RCACHE_BLOCKS] = block;
   logfs->readblock_valid[block % RCACHE_BLOCKS] = 1;
-  /* Else we did it */
-}
-
-void printBuffer(const void *buf, int len)
-{
-  int i;
-  const char *char_buf = (const char *)buf;
-  printf("Buffer has: ");
-  for (i = 0; i < len; ++i)
-  {
-    printf("%c", char_buf[i] ? char_buf[i] : '.');
-  }
-  printf("\n");
 }
 
 int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
@@ -312,18 +301,22 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
     return 0;
   }
 
+  /* Check for cache miss on the last block. */
   if (!logfs->readblock_valid[currblock % RCACHE_BLOCKS] || logfs->readblock_check[currblock % RCACHE_BLOCKS] != currblock)
   {
     cache_miss(logfs, currblock);
   }
 
+  /* Finally, memcpy.*/
   if ((logfs->head % logfs->RBUFFER_SIZE) + len > logfs->RBUFFER_SIZE)
   {
+    /* If we're at the end of the buffer, we have to split it up. */
     memcpy(shift(buf, currlen), shift(logfs->readbuffer, (off + currlen % logfs->RBUFFER_SIZE)), logfs->RBUFFER_SIZE - (logfs->head % logfs->RBUFFER_SIZE));
     memcpy(shift(buf, currlen + logfs->RBUFFER_SIZE - (logfs->head % logfs->RBUFFER_SIZE)), logfs->readbuffer, len - logfs->RBUFFER_SIZE + (logfs->head % logfs->RBUFFER_SIZE));
   }
   else
   {
+    /* Otherwise simple memcpy from buffer. */
     memcpy(shift(buf, currlen), shift(logfs->readbuffer, (off + currlen) % logfs->RBUFFER_SIZE), len - currlen);
   }
 
@@ -332,6 +325,7 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
 
 int logfs_append(struct logfs *logfs, const void *buf, uint64_t len)
 {
+  /* Out of memory check */
   if ((logfs->head + len) > logfs->device->size)
   {
     TRACE("Cannot write further to the device.");
@@ -342,6 +336,7 @@ int logfs_append(struct logfs *logfs, const void *buf, uint64_t len)
   assert(len <= logfs->WBUFFER_SIZE);
   for (;;)
   {
+    /* If we're out of room in our write buffer, we wait for the thread to work */
     if ((logfs->WBUFFER_SIZE - logfs_size(logfs)) < len)
     {
       pthread_cond_wait(&logfs->space_avail, &logfs->lock);
@@ -350,6 +345,7 @@ int logfs_append(struct logfs *logfs, const void *buf, uint64_t len)
     break;
   }
 
+  /* If we are at the end of writebuffer, we have to loop around. */
   if ((logfs->head % logfs->WBUFFER_SIZE) + len > logfs->WBUFFER_SIZE)
   {
     memcpy(shift(logfs->writebuffer, (logfs->head % logfs->WBUFFER_SIZE)), buf, logfs->WBUFFER_SIZE - (logfs->head % logfs->WBUFFER_SIZE));
@@ -360,7 +356,10 @@ int logfs_append(struct logfs *logfs, const void *buf, uint64_t len)
     memcpy(shift(logfs->writebuffer, (logfs->head % logfs->WBUFFER_SIZE)), buf, len);
   }
 
+  /* Increment head by len. */
   logfs->head += len;
+
+  /* Relinquish the lock and let writer write. */
   pthread_cond_signal(&logfs->data_avail);
   pthread_mutex_unlock(&logfs->lock);
 
