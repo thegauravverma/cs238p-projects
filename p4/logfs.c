@@ -158,6 +158,7 @@ struct logfs *logfs_open(const char *pathname)
     exit(1);
   }
   logfs->writebuffer = memory_align(logfs->writebuffer_toDelete, logfs->BLOCK_SIZE);
+  memset(logfs->writebuffer, 0, WCACHE_BLOCKS * logfs->BLOCK_SIZE);
 
   if (!(logfs->readbuffer_toDelete = malloc((RCACHE_BLOCKS + 1) * logfs->BLOCK_SIZE)))
   {
