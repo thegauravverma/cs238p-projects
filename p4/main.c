@@ -212,6 +212,98 @@ heavy_rewrite(void)
 }
 
 static int
+basicer_logic_restore(void)
+{
+	char *buf, *buf2;
+	struct logfs *logfs, *logfs2;
+	buf = malloc(sizeof(char) * 12);
+	buf2 = malloc(sizeof(char) * 12);
+	logfs = logfs_open("block_device");
+	logfs_append(logfs, "Hello", 6);
+	logfs_read(logfs, buf, 0, 6);
+	printf("First: [%s]\n", buf);
+	logfs_close(logfs);
+
+	logfs2 = logfs_open("block_device");
+	logfs_append(logfs2, "World", 6);
+	logfs_read(logfs2, buf2, 0, 12);
+	printf("Second: [%s]\n", buf2);
+	logfs_close(logfs2);
+	strcat(buf2, (char *)shift(buf2, 6));
+	printf("[%s]\n", buf2);
+	if (0 != strcmp(buf2, "HelloWorld"))
+	{
+		return -1;
+	}
+
+	free(buf);
+	free(buf2);
+	return 0;
+}
+
+static int test_store_restore_state(void)
+{
+	const char *const KEY = "KEY";
+	const char *const VAL = "VAL";
+	struct kvdb *kvdb;
+	uint64_t val_len;
+	char val[32];
+
+	if (!(kvdb = kvdb_open(PATHNAME)))
+	{
+		TRACE(0);
+		return -1;
+	}
+	if ((0 != kvdb_size(kvdb)) || (0 != kvdb_waste(kvdb)))
+	{
+		kvdb_close(kvdb);
+		TRACE("software");
+		return -1;
+	}
+
+	/* insert, lookup */
+
+	val_len = sizeof(val);
+	if (kvdb_insert(kvdb, KEY, SLEN(KEY), VAL, SLEN(VAL)) ||
+			kvdb_lookup(kvdb, KEY, SLEN(KEY), val, &val_len) ||
+			(SLEN(VAL) != val_len) ||
+			memcmp(VAL, val, val_len) ||
+			(1 != kvdb_size(kvdb)) ||
+			(0 != kvdb_waste(kvdb)))
+	{
+		kvdb_close(kvdb);
+		TRACE("software");
+		return -1;
+	}
+
+	TRACE("Got to the end!");
+	kvdb_close(kvdb);
+
+	if (!(kvdb = kvdb_open(PATHNAME)))
+	{
+		TRACE(0);
+		return -1;
+	}
+
+	/* lookup */
+
+	val_len = sizeof(val);
+	if (kvdb_lookup(kvdb, KEY, SLEN(KEY), val, &val_len) ||
+			(SLEN(VAL) != val_len) ||
+			memcmp(VAL, val, val_len) ||
+			(1 != kvdb_size(kvdb)) ||
+			(0 != kvdb_waste(kvdb)))
+	{
+		kvdb_close(kvdb);
+		TRACE("software");
+		return -1;
+	}
+
+	kvdb_close(kvdb);
+	return 0;
+}
+
+static int
 basicer_logic(void)
 {
 	char *buf;
@@ -390,12 +482,24 @@ int main(int argc, char *argv[])
 
 	/* test */
 
+	/*
 	TEST(basicer_logic, "basicer_logic");
-	TEST(basic_logic, "basic_logic");
-	TEST(read_write_single, "read_write_single");
-	TEST(read_write_small, "read_write_small");
-	TEST(read_write_large, "read_write_large");
-	TEST(heavy_rewrite, "heavy_rewrite");
+		TEST(basic_logic, "basic_logic");
+		TEST(read_write_single, "read_write_single");
+		TEST(read_write_small, "read_write_small");
+		TEST(read_write_large, "read_write_large");
+		TEST(heavy_rewrite, "heavy_rewrite");
+		UNUSED(test_store_restore_state);
+	*/
+
+	TEST(basicer_logic_restore, "basicer_logic_restore");
+	UNUSED(basicer_logic);
+	UNUSED(basic_logic);
+	UNUSED(read_write_single);
+	UNUSED(read_write_small);
+	UNUSED(read_write_large);
+	UNUSED(heavy_rewrite);
+	UNUSED(test_store_restore_state);
 
 	/* postlude */
 

@@ -43,6 +43,7 @@ struct logfs
   pthread_cond_t space_avail; /* Flag to mark if we have space available (if we can write more to buffer) */
 
   struct device *device; /* Device */
+  size_t META_SIZE;      /* The size of our meta object at the end of the device. Immutable. */
 
   int done; /* If we are done. For closing up threadwork */
 };
@@ -131,6 +132,72 @@ void *writer(void *arg)
   return NULL;
 }
 
+int store_meta(struct logfs *logfs)
+{
+  char *metabuffer;
+  if (!(metabuffer = malloc(logfs->BLOCK_SIZE)))
+  {
+    TRACE("Couldn't allocate to adding metabuffer");
+    exit(0);
+  }
+
+  if (device_read(logfs->device, metabuffer, logfs->device->size - logfs->BLOCK_SIZE, logfs->BLOCK_SIZE))
+  {
+    TRACE(0);
+    exit(0);
+  }
+
+  memcpy(shift(metabuffer, logfs->BLOCK_SIZE - 16), "Restore", 8);
+  memcpy(shift(metabuffer, logfs->BLOCK_SIZE - 8), (char *)logfs->head, 8);
+
+  if (device_write(logfs->device, metabuffer, logfs->device->size - logfs->BLOCK_SIZE, logfs->BLOCK_SIZE))
+  {
+    TRACE(0);
+    exit(0);
+  }
+
+  return 0;
+}
+
+int check_meta(struct logfs *logfs)
+{
+  char *metabuffer;
+  char *meta;
+  if (!(metabuffer = malloc(logfs->BLOCK_SIZE)))
+  {
+    TRACE("Couldn't malloc to checking metabuffer");
+    exit(0);
+  }
+
+  printf("Device Size: %ld, Block Size: %ld\n", logfs->device->size, logfs->BLOCK_SIZE);
+  if (device_read(logfs->device, metabuffer, logfs->device->size - logfs->BLOCK_SIZE, logfs->BLOCK_SIZE))
+  {
+    TRACE(0);
+    free(metabuffer);
+    exit(0);
+  }
+
+  if (!(meta = malloc(8)))
+  {
+    TRACE("Couldn't malloc to comparing meta");
+    exit(0);
+  }
+
+  memcpy(meta, metabuffer, 8);
+  if (strcmp(meta, "Restore"))
+  {
+    logfs->head = 0;
+  }
+  else
+  {
+    logfs->head = (size_t)(*((char *)shift(metabuffer, logfs->BLOCK_SIZE - 8)));
+  }
+
+  free(meta);
+  free(metabuffer);
+  return 0;
+}
+
 struct logfs *logfs_open(const char *pathname)
 {
   struct logfs *logfs;
@@ -151,6 +218,12 @@ struct logfs *logfs_open(const char *pathname)
   logfs->BLOCK_SIZE = device_block(logfs->device);
   logfs->WBUFFER_SIZE = WCACHE_BLOCKS * logfs->BLOCK_SIZE;
   logfs->RBUFFER_SIZE = RCACHE_BLOCKS * logfs->BLOCK_SIZE;
+  logfs->META_SIZE = sizeof("Restore") + sizeof(size_t);
+  printf("Size of meta: %ld\n", logfs->META_SIZE);
+
+  /* Device: On open, check whether or not we've worked on this file */
+  check_meta(logfs);
+  logfs->tail = logfs->head;
 
   if (!(logfs->writebuffer_toDelete = malloc((WCACHE_BLOCKS + 1) * logfs->BLOCK_SIZE)))
   {
@@ -183,9 +256,6 @@ struct logfs *logfs_open(const char *pathname)
     logfs->readblock_check[i] = 0;
     logfs->readblock_valid[i] = 0;
   }
-
-  logfs->head = 0;
-  logfs->tail = 0;
 
   if (pthread_create(&logfs->writer, NULL, writer, logfs))
   {
@@ -220,6 +290,8 @@ void logfs_close(struct logfs *logfs)
 {
   logfs->done = 1;
   pthread_cond_signal(&logfs->data_avail);
+  flush(logfs);
+  store_meta(logfs);
   pthread_join(logfs->writer, NULL);
 
   pthread_cond_destroy(&logfs->data_avail);
@@ -326,7 +398,7 @@ int logfs_read(struct logfs *logfs, void *buf, uint64_t off, size_t len)
 int logfs_append(struct logfs *logfs, const void *buf, uint64_t len)
 {
   /* Out of memory check */
-  if ((logfs->head + len) > logfs->device->size)
+  if ((logfs->head + len) > logfs->device->size - logfs->META_SIZE)
   {
     TRACE("Cannot write further to the device.");
     return 1;
