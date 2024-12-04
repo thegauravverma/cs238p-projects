@@ -69,12 +69,66 @@ cpu_util(const char *s)
 }
 
 int
+disk_io_time()
+{
+	const char * const DISK_STAT = "/proc/diskstats";
+
+	FILE *disk_file;
+	static unsigned sum_;
+	unsigned sum = 0, vector[20],diff;
+	char diskstat_line[1024];
+	const char *p;
+	char str[20];
+	int scanned;
+
+
+	if (!(disk_file = fopen(DISK_STAT, "r"))) {
+			TRACE("fopen()");
+			return -1;
+		}
+
+	while(fgets(diskstat_line, sizeof (diskstat_line), disk_file)) {
+	if (!(p = strstr(diskstat_line, " ")) || 
+	 (20 != (scanned = sscanf(p,
+			 "%u %u %s %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u",
+			 &vector[0],
+			 &vector[1],
+			 str,
+			 &vector[3],
+			 &vector[4],
+			 &vector[5],
+			 &vector[6],
+			 &vector[7],
+			 &vector[8],
+			 &vector[9],
+			 &vector[10],
+			 &vector[11],
+			 &vector[12],
+			 &vector[13],
+			 &vector[14],
+			 &vector[15],
+			 &vector[16],
+			 &vector[17],
+			 &vector[18],
+			 &vector[19]
+			)))) {
+				return 0;
+			}
+			sum += vector[12];
+	}
+		diff = sum - sum_;
+		sum_ = sum;
+
+	return diff;
+}
+
+int
 main(int argc, char *argv[])
 {
 	const char * const PROC_STAT = "/proc/stat";
 	char line[1024];
 	FILE *file;
-
+	
 	UNUSED(argc);
 	UNUSED(argv);
 
@@ -88,12 +142,16 @@ main(int argc, char *argv[])
 			return -1;
 		}
 		if (fgets(line, sizeof (line), file)) {
-			printf("\r%5.1f%%", cpu_util(line));
+			printf("\r%5.1f%%\n", cpu_util(line));
 			fflush(stdout);
 		}
+		printf("\r%d", disk_io_time());
+
 		us_sleep(500000);
 		fclose(file);
 	}
+
+
 	printf("\rDone!   \n");
 	return 0;
 }
