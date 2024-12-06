@@ -200,7 +200,12 @@ int main(int argc, char *argv[])
 	char line[1024];
 	FILE *file;
 
-	struct net_stats *net_stats = malloc(sizeof(struct net_stats));
+	struct net_stats *net_stats;
+	if (!(net_stats = malloc(sizeof(struct net_stats))))
+	{
+		TRACE("Could not allocate net_stats.");
+		return -1;
+	}
 
 	UNUSED(argc);
 	UNUSED(argv);
