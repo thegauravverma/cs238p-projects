@@ -1,0 +1,15 @@
+bcomer@Bens-Laptop:~/cs238p-projects/p5$ valgrind ./cs238 > valgrind_results.txt
+==510340== Memcheck, a memory error detector
+==510340== Copyright (C) 2002-2017, and GNU GPL'd, by Julian Seward et al.
+==510340== Using Valgrind-3.18.1 and LibVEX; rerun with -h for copyright info
+==510340== Command: ./cs238
+==510340== 
+==510340== 
+==510340== HEAP SUMMARY:
+==510340==     in use at exit: 0 bytes in 0 blocks
+==510340==   total heap usage: 44 allocs, 44 frees, 35,520 bytes allocated
+==510340== 
+==510340== All heap blocks were freed -- no leaks are possible
+==510340== 
+==510340== For lists of detected and suppressed errors, rerun with: -s
+==510340== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)

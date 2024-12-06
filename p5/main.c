@@ -10,11 +10,6 @@
 #include <signal.h>
 #include "system.h"
 
-/**
- * Needs:
- *   signal()
- */
-
 static volatile int done;
 
 static void
@@ -74,6 +69,7 @@ cpu_util(const char *s)
 	{
 		vector_[i] = vector[i];
 	}
+
 	return util;
 }
 
@@ -128,6 +124,7 @@ int disk_io_time()
 	diff = sum - sum_;
 	sum_ = sum;
 
+	fclose(disk_file);
 	return diff;
 }
 
@@ -192,6 +189,8 @@ int netbytes(struct net_stats *net_stats)
 	sumRec_ = sumRec;
 	net_stats->sent = sumSnt - sumSnt_;
 	sumSnt_ = sumSnt;
+
+	fclose(net_file);
 	return 0;
 }
 
